@@ -1,0 +1,47 @@
+============================================================
+学校食堂食材管理系统 - 完整交付包
+============================================================
+
+【运行方式】
+1. 直接双击 "学校食堂食材管理系统.exe" 运行（推荐）
+2. 或用 Python 运行源码：pip install -r requirements.txt && python main.py
+
+【默认登录】
+用户名: admin
+密码: admin123
+
+【文件清单】
+学校食堂食材管理系统.exe    - Windows 可执行程序（单机运行，无需安装）
+食材导入模板.xlsx           - 食材批量导入模板
+app_icon.ico                - 程序图标
+
+main.py                     - 主程序源码（约2000行）
+database.py                 - 数据库层源码（上下文管理器、事务保护）
+excel_handler.py            - Excel 导入导出源码
+generate_template.py        - 导入模板生成器
+full_test.py                - 全面自动化测试脚本（51项测试）
+requirements.txt            - Python 依赖清单
+README.md                   - 项目说明文档
+
+【数据文件】（运行后自动生成）
+canteen.db                  - SQLite 数据库（存储所有业务数据）
+logs/canteen_YYYYMMDD.log   - 运行日志
+
+【系统要求】
+- Windows 10/11 64位
+- 无需安装 Python（使用 exe 时）
+- 屏幕分辨率建议 1920x1080 及以上
+
+【功能模块】
+概览统计 | 提醒中心 | 财务统计 | 食材管理 | 入库管理
+出库管理 | 库存盘点 | 供应商管理 | 分类管理 | 系统设置
+
+【安全特性】
+- SHA256 + 随机盐值密码哈希
+- SQL 注入防护（字段白名单校验）
+- 数据库连接上下文管理器（防止泄漏）
+- 事务保护（BEGIN/COMMIT/ROLLBACK）
+
+【GitHub】
+https://github.com/whblcy/school-canteen-management
+============================================================
