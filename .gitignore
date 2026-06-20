@@ -29,3 +29,8 @@ Desktop.ini
 test_*.py
 test_*.log
 canteen_test.py
+
+# Release packages
+release/
+*.zip
+学校食堂食材管理系统_*/
