@@ -1868,7 +1868,7 @@ class MainWindow(QMainWindow):
         nav_layout.addStretch()
         
         # 版本信息
-        version = QLabel("v2.0.0")
+        version = QLabel("v1.0.1")
         version.setStyleSheet("color: #86868b; padding: 10px; font-size: 12px;")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nav_layout.addWidget(version)
