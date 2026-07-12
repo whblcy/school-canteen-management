@@ -31,18 +31,23 @@ def get_connection():
 
 
 def hash_password(password: str, salt: Optional[str] = None) -> Tuple[str, str]:
-    """密码哈希: SHA256 + 盐值"""
+    """密码哈希: PBKDF2 + 盐值，兼容旧版SHA256"""
     if salt is None:
         salt = secrets.token_hex(16)
-    salted = f"{password}{salt}"
-    password_hash = hashlib.sha256(salted.encode()).hexdigest()
+    # 使用PBKDF2-HMAC-SHA256，迭代100000次
+    password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
     return password_hash, salt
 
 
 def verify_password(password: str, salt: str, password_hash: str) -> bool:
-    """验证密码"""
-    salted = f"{password}{salt}"
-    return hashlib.sha256(salted.encode()).hexdigest() == password_hash
+    """验证密码，兼容旧版SHA256格式"""
+    # 先尝试PBKDF2验证
+    new_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
+    if new_hash == password_hash:
+        return True
+    # 兼容旧版SHA256验证
+    old_hash = hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
+    return old_hash == password_hash
 
 
 def init_database():
@@ -188,6 +193,117 @@ def init_database():
                 INSERT OR IGNORE INTO categories (name, description) VALUES (?, ?)
             ''', (name, desc))
         
+        # 类别映射表 - 用于导入时映射外部类别名称到系统分类
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS category_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_category TEXT NOT NULL,
+                target_category_id INTEGER NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (target_category_id) REFERENCES categories(id),
+                UNIQUE(source_category)
+            )
+        ''')
+        
+        # 进货查验记录表 - 用于存储进货查验信息
+        # stock_in_id 唯一约束：确保一条入库记录只能有一条查验记录
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS inspection_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_in_id INTEGER UNIQUE,
+                ingredient_id INTEGER NOT NULL,
+                quantity REAL NOT NULL,
+                unit TEXT NOT NULL,
+                production_date DATE,
+                shelf_life TEXT,
+                supplier_name TEXT,
+                supplier_address TEXT,
+                supplier_phone TEXT,
+                batch_number TEXT,
+                inspection_result TEXT,
+                inspector TEXT,
+                inspection_date DATE,
+                certificate_no TEXT,
+                remark TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (stock_in_id) REFERENCES stock_in(id),
+                FOREIGN KEY (ingredient_id) REFERENCES ingredients(id)
+            )
+        ''')
+        
+        # 数据库迁移：为已存在的表添加 stock_in_id 字段和唯一约束
+        try:
+            cursor.execute("SELECT stock_in_id FROM inspection_records LIMIT 1")
+            # 字段已存在，检查是否有唯一约束
+            cursor.execute("PRAGMA index_list(inspection_records)")
+            indexes = cursor.fetchall()
+            has_unique_index = any('stock_in_id' in str(idx) for idx in indexes)
+            if not has_unique_index:
+                cursor.execute('''
+                    DELETE FROM inspection_records 
+                    WHERE id NOT IN (
+                        SELECT MAX(id) FROM inspection_records 
+                        WHERE stock_in_id IS NOT NULL 
+                        GROUP BY stock_in_id
+                    ) AND stock_in_id IS NOT NULL
+                ''')
+                conn.commit()
+                try:
+                    cursor.execute("CREATE UNIQUE INDEX idx_inspection_stock_in ON inspection_records(stock_in_id)")
+                except sqlite3.OperationalError:
+                    pass
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE inspection_records ADD COLUMN stock_in_id INTEGER")
+            cursor.execute("CREATE UNIQUE INDEX idx_inspection_stock_in ON inspection_records(stock_in_id)")
+        
+        # 查验人员表 - 存储可选择的查验人员名单
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS inspectors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                phone TEXT,
+                department TEXT,
+                status INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # 插入默认查验人员
+        default_inspectors = ['张三', '李四', '王五', '赵六']
+        for name in default_inspectors:
+            cursor.execute('INSERT OR IGNORE INTO inspectors (name) VALUES (?)', (name,))
+        
+        # 插入默认类别映射
+        default_mappings = [
+            ('鸡肉类', '肉类'),
+            ('蛋类', '蛋类'),
+            ('蔬菜瓜果类', '蔬菜类'),
+            ('干货类', '粮油类'),
+            ('豆制品', '豆制品'),
+            ('调味品', '调味品'),
+            ('水产类', '水产类'),
+            ('水果类', '水果类'),
+            ('猪肉类', '肉类'),
+            ('牛肉类', '肉类'),
+            ('粮油类', '粮油类'),
+            ('禽类', '肉类'),
+            ('面食类', '粮油类'),
+            ('乳制品', '蛋类'),
+            ('速冻食品', '蔬菜类'),
+            ('副食品', '调味品'),
+        ]
+        
+        for source, target_name in default_mappings:
+            cursor.execute('SELECT id FROM categories WHERE name = ?', (target_name,))
+            row = cursor.fetchone()
+            if row:
+                target_id = row['id']
+                cursor.execute('''
+                    INSERT OR IGNORE INTO category_mappings (source_category, target_category_id)
+                    VALUES (?, ?)
+                ''', (source, target_id))
+        
         # 插入默认管理员账号 (密码: admin123)
         # 先检查是否已存在
         cursor.execute("SELECT id FROM users WHERE username = ?", ('admin',))
@@ -305,6 +421,38 @@ class OperationLog:
     created_at: str = ""
 
 
+@dataclass
+class CategoryMapping:
+    id: int
+    source_category: str
+    target_category_id: int
+    description: str = ""
+    created_at: str = ""
+    target_category_name: str = ""
+
+
+@dataclass
+class InspectionRecord:
+    id: int
+    ingredient_id: int
+    quantity: float
+    unit: str
+    stock_in_id: Optional[int] = None
+    production_date: str = ""
+    shelf_life: str = ""
+    supplier_name: str = ""
+    supplier_address: str = ""
+    supplier_phone: str = ""
+    batch_number: str = ""
+    inspection_result: str = ""
+    inspector: str = ""
+    inspection_date: str = ""
+    certificate_no: str = ""
+    remark: str = ""
+    created_at: str = ""
+    ingredient_name: str = ""
+
+
 class UserDAO:
     @staticmethod
     def authenticate(username: str, password: str) -> Optional[User]:
@@ -348,13 +496,16 @@ class UserDAO:
     def update_password(user_id: int, new_password: str) -> bool:
         with get_connection() as conn:
             cursor = conn.cursor()
-            password_hash, salt = hash_password(new_password)
-            cursor.execute(
-                "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?",
-                (password_hash, salt, user_id)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+            try:
+                password_hash, salt = hash_password(new_password)
+                cursor.execute(
+                    "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?",
+                    (password_hash, salt, user_id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception:
+                return False
     
     @staticmethod
     def delete(user_id: int) -> bool:
@@ -368,13 +519,16 @@ class UserDAO:
 class LogDAO:
     @staticmethod
     def add(user_id: Optional[int], action: str, target_type: str = "", target_id: int = 0, details: str = ""):
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO operation_logs (user_id, action, target_type, target_id, details)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (user_id, action, target_type, target_id, details))
-            conn.commit()
+        try:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO operation_logs (user_id, action, target_type, target_id, details)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (user_id, action, target_type, target_id, details))
+                conn.commit()
+        except Exception:
+            pass
     
     @staticmethod
     def get_all(limit: int = 500) -> List[OperationLog]:
@@ -387,6 +541,21 @@ class LogDAO:
                 ORDER BY l.created_at DESC
                 LIMIT ?
             ''', (limit,))
+            rows = cursor.fetchall()
+            return [OperationLog(**{k: v for k, v in dict(row).items() if k in OperationLog.__dataclass_fields__}) for row in rows]
+    
+    @staticmethod
+    def get_by_action_keyword(keyword: str, limit: int = 10) -> List[OperationLog]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT l.*, u.username, u.real_name
+                FROM operation_logs l
+                LEFT JOIN users u ON l.user_id = u.id
+                WHERE l.action LIKE ?
+                ORDER BY l.created_at DESC
+                LIMIT ?
+            ''', (f"%{keyword}%", limit))
             rows = cursor.fetchall()
             return [OperationLog(**{k: v for k, v in dict(row).items() if k in OperationLog.__dataclass_fields__}) for row in rows]
 
@@ -461,29 +630,35 @@ class SupplierDAO:
             address: str = "", email: str = "") -> int:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO suppliers (name, contact_person, phone, address, email)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (name, contact_person, phone, address, email))
-            conn.commit()
-            return cursor.lastrowid
+            try:
+                cursor.execute('''
+                    INSERT INTO suppliers (name, contact_person, phone, address, email)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (name, contact_person, phone, address, email))
+                conn.commit()
+                return cursor.lastrowid
+            except sqlite3.IntegrityError:
+                return 0
     
     @staticmethod
     def update(id: int, **kwargs) -> bool:
         with get_connection() as conn:
             cursor = conn.cursor()
-            fields = []
-            values = []
-            for key, value in kwargs.items():
-                if key in SupplierDAO.ALLOWED_FIELDS:
-                    fields.append(f"{key}=?")
-                    values.append(value)
-            if not fields:
+            try:
+                fields = []
+                values = []
+                for key, value in kwargs.items():
+                    if key in SupplierDAO.ALLOWED_FIELDS:
+                        fields.append(f"{key}=?")
+                        values.append(value)
+                if not fields:
+                    return False
+                values.append(id)
+                cursor.execute(f"UPDATE suppliers SET {', '.join(fields)} WHERE id=?", values)
+                conn.commit()
+                return cursor.rowcount > 0
+            except sqlite3.IntegrityError:
                 return False
-            values.append(id)
-            cursor.execute(f"UPDATE suppliers SET {', '.join(fields)} WHERE id=?", values)
-            conn.commit()
-            return cursor.rowcount > 0
     
     @staticmethod
     def delete(id: int) -> bool:
@@ -549,29 +724,35 @@ class IngredientDAO:
             safety_stock: float = 0, supplier_id: Optional[int] = None) -> int:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO ingredients (name, category_id, unit, specification, safety_stock, supplier_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (name, category_id, unit, specification, safety_stock, supplier_id))
-            conn.commit()
-            return cursor.lastrowid
+            try:
+                cursor.execute('''
+                    INSERT INTO ingredients (name, category_id, unit, specification, safety_stock, supplier_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (name, category_id, unit, specification, safety_stock, supplier_id))
+                conn.commit()
+                return cursor.lastrowid
+            except sqlite3.IntegrityError:
+                return 0
     
     @staticmethod
     def update(id: int, **kwargs) -> bool:
         with get_connection() as conn:
             cursor = conn.cursor()
-            fields = []
-            values = []
-            for key, value in kwargs.items():
-                if key in IngredientDAO.ALLOWED_FIELDS:
-                    fields.append(f"{key}=?")
-                    values.append(value)
-            if not fields:
+            try:
+                fields = []
+                values = []
+                for key, value in kwargs.items():
+                    if key in IngredientDAO.ALLOWED_FIELDS:
+                        fields.append(f"{key}=?")
+                        values.append(value)
+                if not fields:
+                    return False
+                values.append(id)
+                cursor.execute(f"UPDATE ingredients SET {', '.join(fields)} WHERE id=?", values)
+                conn.commit()
+                return cursor.rowcount > 0
+            except sqlite3.IntegrityError:
                 return False
-            values.append(id)
-            cursor.execute(f"UPDATE ingredients SET {', '.join(fields)} WHERE id=?", values)
-            conn.commit()
-            return cursor.rowcount > 0
     
     @staticmethod
     def delete(id: int) -> bool:
@@ -593,6 +774,15 @@ class IngredientDAO:
             conn.commit()
             return cursor.rowcount > 0
 
+    @staticmethod
+    def get_stock(id: int) -> float:
+        """获取食材当前库存"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT current_stock FROM ingredients WHERE id=?", (id,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
+
 
 class StockInDAO:
     @staticmethod
@@ -613,7 +803,7 @@ class StockInDAO:
     def add(ingredient_id: int, quantity: float, unit_price: float,
             supplier_id: Optional[int] = None, batch_number: str = "",
             production_date: str = "", expiry_date: str = "",
-            operator: str = "", remark: str = "") -> int:
+            operator: str = "", remark: str = "", created_at: str = "") -> int:
         if quantity < 0 or unit_price < 0:
             raise ValueError("数量和单价不能为负数")
         
@@ -624,13 +814,23 @@ class StockInDAO:
             try:
                 cursor.execute("BEGIN")
                 
-                cursor.execute('''
-                    INSERT INTO stock_in (ingredient_id, quantity, unit_price, total_price,
-                                        supplier_id, batch_number, production_date, expiry_date,
-                                        operator, remark)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (ingredient_id, quantity, unit_price, total_price, supplier_id,
-                      batch_number, production_date, expiry_date, operator, remark))
+                # 如果提供了created_at，使用它；否则使用当前时间
+                if created_at:
+                    cursor.execute('''
+                        INSERT INTO stock_in (ingredient_id, quantity, unit_price, total_price,
+                                            supplier_id, batch_number, production_date, expiry_date,
+                                            operator, remark, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (ingredient_id, quantity, unit_price, total_price, supplier_id,
+                          batch_number, production_date, expiry_date, operator, remark, created_at))
+                else:
+                    cursor.execute('''
+                        INSERT INTO stock_in (ingredient_id, quantity, unit_price, total_price,
+                                            supplier_id, batch_number, production_date, expiry_date,
+                                            operator, remark)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (ingredient_id, quantity, unit_price, total_price, supplier_id,
+                          batch_number, production_date, expiry_date, operator, remark))
                 
                 last_id = cursor.lastrowid
                 
@@ -965,3 +1165,338 @@ class ReportDAO:
             ''')
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
+
+
+class CategoryMappingDAO:
+    @staticmethod
+    def get_all() -> List[CategoryMapping]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT cm.*, c.name as target_category_name
+                FROM category_mappings cm
+                JOIN categories c ON cm.target_category_id = c.id
+                ORDER BY cm.source_category
+            ''')
+            rows = cursor.fetchall()
+            return [CategoryMapping(**dict(row)) for row in rows]
+    
+    @staticmethod
+    def get_by_source(source: str) -> Optional[CategoryMapping]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT cm.*, c.name as target_category_name
+                FROM category_mappings cm
+                JOIN categories c ON cm.target_category_id = c.id
+                WHERE cm.source_category = ?
+            ''', (source,))
+            row = cursor.fetchone()
+            return CategoryMapping(**dict(row)) if row else None
+    
+    @staticmethod
+    def add(source_category: str, target_category_id: int, description: str = "") -> bool:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT INTO category_mappings (source_category, target_category_id, description)
+                    VALUES (?, ?, ?)
+                ''', (source_category, target_category_id, description))
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
+    
+    @staticmethod
+    def update(id: int, source_category: str, target_category_id: int, description: str = "") -> bool:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    UPDATE category_mappings 
+                    SET source_category = ?, target_category_id = ?, description = ?
+                    WHERE id = ?
+                ''', (source_category, target_category_id, description, id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except sqlite3.IntegrityError:
+                return False
+    
+    @staticmethod
+    def delete(id: int) -> bool:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM category_mappings WHERE id = ?", (id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+
+class InspectionRecordDAO:
+    @staticmethod
+    def get_all(limit: int = 100) -> List[InspectionRecord]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ir.*, i.name as ingredient_name
+                FROM inspection_records ir
+                JOIN ingredients i ON ir.ingredient_id = i.id
+                ORDER BY ir.created_at DESC
+                LIMIT ?
+            ''', (limit,))
+            rows = cursor.fetchall()
+            return [InspectionRecord(**dict(row)) for row in rows]
+
+    @staticmethod
+    def get_by_stock_in_id(stock_in_id: int) -> Optional[InspectionRecord]:
+        """根据入库记录ID查询查验记录"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ir.*, i.name as ingredient_name
+                FROM inspection_records ir
+                JOIN ingredients i ON ir.ingredient_id = i.id
+                WHERE ir.stock_in_id = ?
+            ''', (stock_in_id,))
+            row = cursor.fetchone()
+            if row:
+                return InspectionRecord(**dict(row))
+            return None
+    
+    @staticmethod
+    def get_by_date(date: str) -> List[InspectionRecord]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ir.*, i.name as ingredient_name
+                FROM inspection_records ir
+                JOIN ingredients i ON ir.ingredient_id = i.id
+                WHERE ir.inspection_date = ?
+                ORDER BY ir.created_at DESC
+            ''', (date,))
+            rows = cursor.fetchall()
+            return [InspectionRecord(**dict(row)) for row in rows]
+    
+    @staticmethod
+    def get_by_date_range(date_from: str, date_to: str) -> List[InspectionRecord]:
+        """按日期范围查询记录，未查验的优先显示"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ir.*, i.name as ingredient_name
+                FROM inspection_records ir
+                JOIN ingredients i ON ir.ingredient_id = i.id
+                WHERE ir.inspection_date >= ? AND ir.inspection_date <= ?
+                ORDER BY 
+                    CASE WHEN ir.inspector = '' OR ir.inspector IS NULL THEN 0 ELSE 1 END,
+                    ir.inspection_date DESC,
+                    ir.created_at DESC
+            ''', (date_from, date_to))
+            rows = cursor.fetchall()
+            return [InspectionRecord(**dict(row)) for row in rows]
+    
+    @staticmethod
+    def add(ingredient_id: int, quantity: float, unit: str,
+            stock_in_id: Optional[int] = None,
+            production_date: str = "", shelf_life: str = "",
+            supplier_name: str = "", supplier_address: str = "",
+            supplier_phone: str = "", batch_number: str = "",
+            inspection_result: str = "", inspector: str = "",
+            inspection_date: str = "", certificate_no: str = "",
+            remark: str = "") -> int:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT INTO inspection_records (
+                        stock_in_id, ingredient_id, quantity, unit, production_date, shelf_life,
+                        supplier_name, supplier_address, supplier_phone, batch_number,
+                        inspection_result, inspector, inspection_date, certificate_no, remark
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (stock_in_id, ingredient_id, quantity, unit, production_date, shelf_life,
+                      supplier_name, supplier_address, supplier_phone, batch_number,
+                      inspection_result, inspector, inspection_date, certificate_no, remark))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception:
+                return 0
+    
+    @staticmethod
+    def batch_add_or_update(records: List[dict]) -> tuple:
+        """批量保存查验记录：如果已存在该入库记录的查验记录则更新，否则新增
+        返回: (新增数量, 更新数量)
+        """
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            insert_count = 0
+            update_count = 0
+            for record in records:
+                try:
+                    stock_in_id = record.get('stock_in_id')
+                    if stock_in_id:
+                        # 检查是否已存在该入库记录的查验记录
+                        cursor.execute('SELECT id FROM inspection_records WHERE stock_in_id = ?', (stock_in_id,))
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # 更新已有记录
+                            cursor.execute('''
+                                UPDATE inspection_records SET
+                                    quantity = ?, unit = ?, production_date = ?, shelf_life = ?,
+                                    supplier_name = ?, supplier_address = ?, supplier_phone = ?,
+                                    batch_number = ?, inspection_result = ?, inspector = ?,
+                                    inspection_date = ?, certificate_no = ?, remark = ?
+                                WHERE stock_in_id = ?
+                            ''', (record['quantity'], record['unit'],
+                                  record.get('production_date', ""), record.get('shelf_life', ""),
+                                  record.get('supplier_name', ""), record.get('supplier_address', ""),
+                                  record.get('supplier_phone', ""), record.get('batch_number', ""),
+                                  record.get('inspection_result', ""), record.get('inspector', ""),
+                                  record.get('inspection_date', ""), record.get('certificate_no', ""),
+                                  record.get('remark', ""), stock_in_id))
+                            update_count += 1
+                        else:
+                            # 新增记录
+                            cursor.execute('''
+                                INSERT INTO inspection_records (
+                                    stock_in_id, ingredient_id, quantity, unit, production_date, shelf_life,
+                                    supplier_name, supplier_address, supplier_phone, batch_number,
+                                    inspection_result, inspector, inspection_date, certificate_no, remark
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (stock_in_id, record['ingredient_id'], record['quantity'], record['unit'],
+                                  record.get('production_date', ""), record.get('shelf_life', ""),
+                                  record.get('supplier_name', ""), record.get('supplier_address', ""),
+                                  record.get('supplier_phone', ""), record.get('batch_number', ""),
+                                  record.get('inspection_result', ""), record.get('inspector', ""),
+                                  record.get('inspection_date', ""), record.get('certificate_no', ""),
+                                  record.get('remark', "")))
+                            insert_count += 1
+                    else:
+                        # 无 stock_in_id，直接新增
+                        cursor.execute('''
+                            INSERT INTO inspection_records (
+                                ingredient_id, quantity, unit, production_date, shelf_life,
+                                supplier_name, supplier_address, supplier_phone, batch_number,
+                                inspection_result, inspector, inspection_date, certificate_no, remark
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (record['ingredient_id'], record['quantity'], record['unit'],
+                              record.get('production_date', ""), record.get('shelf_life', ""),
+                              record.get('supplier_name', ""), record.get('supplier_address', ""),
+                              record.get('supplier_phone', ""), record.get('batch_number', ""),
+                              record.get('inspection_result', ""), record.get('inspector', ""),
+                              record.get('inspection_date', ""), record.get('certificate_no', ""),
+                              record.get('remark', "")))
+                        insert_count += 1
+                except Exception:
+                    pass
+            conn.commit()
+            return insert_count, update_count
+    
+    @staticmethod
+    def update(id: int, **kwargs) -> bool:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                allowed_fields = {'stock_in_id', 'quantity', 'unit', 'production_date', 'shelf_life',
+                                  'supplier_name', 'supplier_address', 'supplier_phone',
+                                  'batch_number', 'inspection_result', 'inspector',
+                                  'inspection_date', 'certificate_no', 'remark'}
+                fields = []
+                values = []
+                for key, value in kwargs.items():
+                    if key in allowed_fields:
+                        fields.append(f"{key}=?")
+                        values.append(value)
+                if not fields:
+                    return False
+                values.append(id)
+                cursor.execute(f"UPDATE inspection_records SET {', '.join(fields)} WHERE id=?", values)
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception:
+                return False
+    
+    @staticmethod
+    def delete(id: int) -> bool:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM inspection_records WHERE id = ?", (id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+
+@dataclass
+class Inspector:
+    id: int
+    name: str
+    phone: str = ""
+    department: str = ""
+    status: int = 1
+    created_at: str = ""
+
+
+class InspectorDAO:
+    """查验人员DAO"""
+    @staticmethod
+    def get_all() -> List[Inspector]:
+        """获取所有查验人员"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM inspectors ORDER BY name')
+            rows = cursor.fetchall()
+            return [Inspector(**dict(row)) for row in rows]
+    
+    @staticmethod
+    def get_active() -> List[Inspector]:
+        """获取活跃的查验人员"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM inspectors WHERE status = 1 ORDER BY name')
+            rows = cursor.fetchall()
+            return [Inspector(**dict(row)) for row in rows]
+    
+    @staticmethod
+    def add(name: str, phone: str = "", department: str = "") -> int:
+        """添加查验人员"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT INTO inspectors (name, phone, department) VALUES (?, ?, ?)
+                ''', (name, phone, department))
+                conn.commit()
+                return cursor.lastrowid
+            except Exception:
+                return 0
+    
+    @staticmethod
+    def update(id: int, **kwargs) -> bool:
+        """更新查验人员"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                allowed_fields = {'name', 'phone', 'department', 'status'}
+                fields = []
+                values = []
+                for key, value in kwargs.items():
+                    if key in allowed_fields:
+                        fields.append(f"{key}=?")
+                        values.append(value)
+                if not fields:
+                    return False
+                values.append(id)
+                cursor.execute(f"UPDATE inspectors SET {', '.join(fields)} WHERE id=?", values)
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception:
+                return False
+    
+    @staticmethod
+    def delete(id: int) -> bool:
+        """删除查验人员"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM inspectors WHERE id = ?", (id,))
+            conn.commit()
+            return cursor.rowcount > 0
+

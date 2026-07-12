@@ -34,3 +34,11 @@ canteen_test.py
 release/
 *.zip
 学校食堂食材管理系统_*/
+
+# Excel temp files
+~$*
+
+# Data files
+表格/
+每日出入库表_*.xlsx
+食材导入模板_*.xlsx
