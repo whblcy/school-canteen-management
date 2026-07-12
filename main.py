@@ -39,7 +39,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QGroupBox, QFrame, QStackedWidget,
                              QFileDialog, QInputDialog, QGridLayout,
                              QScrollArea, QSizePolicy, QCheckBox, QToolButton, QMenu)
-from PyQt6.QtCore import Qt, QDate, QSize
+from PyQt6.QtCore import Qt, QDate, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QFont, QPalette, QColor
 
 from database import (init_database, DB_PATH, UserDAO, CategoryDAO, SupplierDAO, IngredientDAO,
@@ -1014,6 +1014,10 @@ class IngredientDialog(BaseDialog):
         self.btn_edit = QPushButton("✏️ 编辑")
         self.btn_delete = QPushButton("🗑️ 删除")
         self.btn_delete.setObjectName("danger")
+        self.btn_select_all = QPushButton("☑️ 全选")
+        self.btn_select_all.setObjectName("secondary")
+        self.btn_batch_delete = QPushButton("🗑️ 批量删除")
+        self.btn_batch_delete.setObjectName("danger")
         self.btn_import = QPushButton("📥 导入Excel")
         self.btn_import.setObjectName("warning")
         self.btn_export = QPushButton("📤 导出余量")
@@ -1023,6 +1027,8 @@ class IngredientDialog(BaseDialog):
         row2.addWidget(self.btn_add)
         row2.addWidget(self.btn_edit)
         row2.addWidget(self.btn_delete)
+        row2.addWidget(self.btn_select_all)
+        row2.addWidget(self.btn_batch_delete)
         row2.addStretch()
         row2.addWidget(self.btn_import)
         row2.addWidget(self.btn_export)
@@ -1033,11 +1039,13 @@ class IngredientDialog(BaseDialog):
         
         # 底部数据表格
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
-            "ID", "食材名称", "分类", "规格", "单位", "当前库存", "安全库存", "供应商"
+            "✅", "ID", "食材名称", "分类", "规格", "单位", "当前库存", "安全库存", "供应商"
         ])
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 40)
+        self.table.setColumnHidden(1, True)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table, 1)
@@ -1045,6 +1053,8 @@ class IngredientDialog(BaseDialog):
         self.btn_add.clicked.connect(self.add_ingredient)
         self.btn_edit.clicked.connect(self.edit_ingredient)
         self.btn_delete.clicked.connect(self.delete_ingredient)
+        self.btn_select_all.clicked.connect(self.select_all_ingredients)
+        self.btn_batch_delete.clicked.connect(self.batch_delete_ingredients)
         self.btn_import.clicked.connect(self.import_excel)
         self.btn_export.clicked.connect(self.export_excel)
         self.btn_template.clicked.connect(self.download_template)
@@ -1053,17 +1063,22 @@ class IngredientDialog(BaseDialog):
         ingredients = IngredientDAO.get_all()
         self.table.setRowCount(len(ingredients))
         for i, ing in enumerate(ingredients):
-            self.table.setItem(i, 0, QTableWidgetItem(str(ing.id)))
-            self.table.setItem(i, 1, QTableWidgetItem(ing.name))
-            self.table.setItem(i, 2, QTableWidgetItem(ing.category_name))
-            self.table.setItem(i, 3, QTableWidgetItem(ing.specification))
-            self.table.setItem(i, 4, QTableWidgetItem(ing.unit))
-            self.table.setItem(i, 5, QTableWidgetItem(str(ing.current_stock)))
-            self.table.setItem(i, 6, QTableWidgetItem(str(ing.safety_stock)))
-            self.table.setItem(i, 7, QTableWidgetItem(ing.supplier_name))
+            check_item = QTableWidgetItem()
+            check_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            check_item.setCheckState(Qt.CheckState.Unchecked)
+            self.table.setItem(i, 0, check_item)
+            
+            self.table.setItem(i, 1, QTableWidgetItem(str(ing.id)))
+            self.table.setItem(i, 2, QTableWidgetItem(ing.name))
+            self.table.setItem(i, 3, QTableWidgetItem(ing.category_name))
+            self.table.setItem(i, 4, QTableWidgetItem(ing.specification))
+            self.table.setItem(i, 5, QTableWidgetItem(ing.unit))
+            self.table.setItem(i, 6, QTableWidgetItem(str(ing.current_stock)))
+            self.table.setItem(i, 7, QTableWidgetItem(str(ing.safety_stock)))
+            self.table.setItem(i, 8, QTableWidgetItem(ing.supplier_name))
             
             if ing.current_stock <= ing.safety_stock:
-                self.table.item(i, 5).setBackground(QColor("#ffcccc"))
+                self.table.item(i, 6).setBackground(QColor("#ffcccc"))
     
     def search(self):
         keyword = self.search_edit.text().lower()
@@ -1076,17 +1091,22 @@ class IngredientDialog(BaseDialog):
 
         self.table.setRowCount(len(filtered))
         for i, ing in enumerate(filtered):
-            self.table.setItem(i, 0, QTableWidgetItem(str(ing.id)))
-            self.table.setItem(i, 1, QTableWidgetItem(ing.name))
-            self.table.setItem(i, 2, QTableWidgetItem(ing.category_name))
-            self.table.setItem(i, 3, QTableWidgetItem(ing.specification))
-            self.table.setItem(i, 4, QTableWidgetItem(ing.unit))
-            self.table.setItem(i, 5, QTableWidgetItem(str(ing.current_stock)))
-            self.table.setItem(i, 6, QTableWidgetItem(str(ing.safety_stock)))
-            self.table.setItem(i, 7, QTableWidgetItem(ing.supplier_name))
+            check_item = QTableWidgetItem()
+            check_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            check_item.setCheckState(Qt.CheckState.Unchecked)
+            self.table.setItem(i, 0, check_item)
+            
+            self.table.setItem(i, 1, QTableWidgetItem(str(ing.id)))
+            self.table.setItem(i, 2, QTableWidgetItem(ing.name))
+            self.table.setItem(i, 3, QTableWidgetItem(ing.category_name))
+            self.table.setItem(i, 4, QTableWidgetItem(ing.specification))
+            self.table.setItem(i, 5, QTableWidgetItem(ing.unit))
+            self.table.setItem(i, 6, QTableWidgetItem(str(ing.current_stock)))
+            self.table.setItem(i, 7, QTableWidgetItem(str(ing.safety_stock)))
+            self.table.setItem(i, 8, QTableWidgetItem(ing.supplier_name))
 
             if ing.current_stock <= ing.safety_stock:
-                self.table.item(i, 5).setBackground(QColor("#ffcccc"))
+                self.table.item(i, 6).setBackground(QColor("#ffcccc"))
     
     def add_ingredient(self):
         dialog = IngredientEditDialog(self)
@@ -1124,8 +1144,8 @@ class IngredientDialog(BaseDialog):
             self.show_error("请选择要删除的食材")
             return
         
-        ingredient_id = int(self.table.item(row, 0).text())
-        name = self.table.item(row, 1).text()
+        ingredient_id = int(self.table.item(row, 1).text())
+        name = self.table.item(row, 2).text()
         
         if self.confirm(f"确定要删除食材 '{name}' 吗？"):
             if IngredientDAO.delete(ingredient_id):
@@ -1134,6 +1154,52 @@ class IngredientDialog(BaseDialog):
                 self.load_data()
             else:
                 self.show_error("删除失败，该食材可能已被入库/出库记录引用，无法删除")
+    
+    def select_all_ingredients(self):
+        """全选食材列表"""
+        for i in range(self.table.rowCount()):
+            check_item = self.table.item(i, 0)
+            if check_item:
+                check_item.setCheckState(Qt.CheckState.Checked)
+    
+    def batch_delete_ingredients(self):
+        """批量删除选中的食材"""
+        selected_ids = []
+        selected_names = []
+        
+        for i in range(self.table.rowCount()):
+            check_item = self.table.item(i, 0)
+            if check_item and check_item.checkState() == Qt.CheckState.Checked:
+                selected_ids.append(int(self.table.item(i, 1).text()))
+                selected_names.append(self.table.item(i, 2).text())
+        
+        if not selected_ids:
+            self.show_error("请先选择要删除的食材")
+            return
+        
+        if self.confirm(
+            f"确定要删除选中的 {len(selected_ids)} 条食材吗？\n\n"
+            f"食材列表：{', '.join(selected_names[:5])}{'...' if len(selected_names) > 5 else ''}\n\n"
+            "⚠️ 警告：此操作不可撤销！"
+        ):
+            success_count = 0
+            fail_count = 0
+            
+            for i, (ingredient_id, name) in enumerate(zip(selected_ids, selected_names)):
+                try:
+                    if IngredientDAO.delete(ingredient_id):
+                        success_count += 1
+                        LogDAO.add(None, "删除食材", "ingredient", ingredient_id, f"食材: {name}")
+                    else:
+                        fail_count += 1
+                except Exception as e:
+                    fail_count += 1
+            
+            if success_count > 0:
+                self.show_info(f"批量删除完成！成功删除 {success_count} 条，失败 {fail_count} 条")
+                self.load_data()
+            else:
+                self.show_error(f"删除失败！所有 {fail_count} 条食材可能已被引用")
     
     def import_excel(self):
         success, msg = ExcelHandler.import_ingredients(self)
@@ -1662,11 +1728,17 @@ class InspectionRecordDialog(BaseDialog):
         self.btn_add.setObjectName("success")
         self.btn_delete = QPushButton("🗑️ 删除")
         self.btn_delete.setObjectName("danger")
+        self.btn_select_all = QPushButton("☑️ 全选")
+        self.btn_select_all.setObjectName("secondary")
+        self.btn_unselect_all = QPushButton("⬜ 取消全选")
+        self.btn_unselect_all.setObjectName("secondary")
         self.btn_batch_delete = QPushButton("🗑️ 批量删除")
         self.btn_batch_delete.setObjectName("danger")
         
         btn_record_layout.addWidget(self.btn_add)
         btn_record_layout.addWidget(self.btn_delete)
+        btn_record_layout.addWidget(self.btn_select_all)
+        btn_record_layout.addWidget(self.btn_unselect_all)
         btn_record_layout.addWidget(self.btn_batch_delete)
         btn_record_layout.addStretch()
         record_layout.addLayout(btn_record_layout)
@@ -1689,6 +1761,8 @@ class InspectionRecordDialog(BaseDialog):
         
         self.btn_add.clicked.connect(self.add_record)
         self.btn_delete.clicked.connect(self.delete_record)
+        self.btn_select_all.clicked.connect(self.select_all_records)
+        self.btn_unselect_all.clicked.connect(self.unselect_all_records)
         self.btn_batch_delete.clicked.connect(self.batch_delete_records)
         
     def load_data(self):
@@ -1814,12 +1888,9 @@ class InspectionRecordDialog(BaseDialog):
             self.batch_table.setItem(row_idx, 12, stock_in_id_item)
         
         if rows:
-            msg = f"已加载 {len(rows)} 条入库数据"
-            if inspected_count > 0:
-                msg += f"（其中 {inspected_count} 条已查验，显示为绿色）"
-            self.show_info(msg)
+            pass
         else:
-            self.show_info(f"{date_str} 没有入库数据")
+            pass
     
     def batch_set_fields(self):
         """批量设置查验结果和查验人"""
@@ -1847,6 +1918,20 @@ class InspectionRecordDialog(BaseDialog):
                 count += 1
         
         self.show_info(f"已批量设置 {count} 条记录")
+    
+    def select_all_records(self):
+        """全选查验记录列表"""
+        for i in range(self.record_table.rowCount()):
+            check_item = self.record_table.item(i, 0)
+            if check_item:
+                check_item.setCheckState(Qt.CheckState.Checked)
+    
+    def unselect_all_records(self):
+        """取消全选查验记录列表"""
+        for i in range(self.record_table.rowCount()):
+            check_item = self.record_table.item(i, 0)
+            if check_item:
+                check_item.setCheckState(Qt.CheckState.Unchecked)
     
     def select_all_batch(self):
         """全选批量表格"""
@@ -2033,10 +2118,9 @@ class InspectionRecordDialog(BaseDialog):
             self.show_error("请先勾选要删除的记录")
             return
         
-        if self.show_warning(
+        if self.confirm(
             f"确定要删除选中的 {len(selected_ids)} 条查验记录吗？\n\n"
-            "⚠️ 警告：此操作不可撤销，将永久删除这些记录！",
-            "批量删除确认"
+            "⚠️ 警告：此操作不可撤销，将永久删除这些记录！"
         ):
             deleted_count = 0
             for record_id in selected_ids:
@@ -2322,6 +2406,8 @@ class StockOutDialog(BaseDialog):
         
         self.btn_out.clicked.connect(self.do_stock_out)
         self.ingredient_combo.currentIndexChanged.connect(self.on_ingredient_changed)
+        # 初始化时填充首个食材的加权平均单价
+        self.on_ingredient_changed()
         
     def load_ingredients(self):
         self.ingredient_combo.clear()
@@ -2337,6 +2423,9 @@ class StockOutDialog(BaseDialog):
             ingredient = IngredientDAO.get_by_id(ingredient_id)
             if ingredient:
                 self.quantity_spin.setMaximum(ingredient.current_stock)
+                # 自动填充加权平均单价，确保财务数据准确
+                weighted_price = StockOutDAO.get_weighted_price(ingredient_id)
+                self.price_spin.setValue(weighted_price)
     
     def load_data(self):
         records = StockOutDAO.get_all()
@@ -2487,10 +2576,12 @@ class StockOutDialog(BaseDialog):
             operator = self.batch_table.item(i, 7).text() if self.batch_table.item(i, 7) else ""
 
             try:
+                # 使用加权平均单价，确保财务数据准确
+                weighted_price = StockOutDAO.get_weighted_price(ingredient_id)
                 success, msg = StockOutDAO.add(
                     ingredient_id=ingredient_id,
                     quantity=quantity,
-                    unit_price=0,
+                    unit_price=weighted_price,
                     purpose=purpose,
                     department=department,
                     operator=operator,
@@ -3248,6 +3339,8 @@ class AlertWidget(QWidget):
 
 class SettingsWidget(QWidget):
     """系统设置页面"""
+    data_cleared = pyqtSignal()  # 数据清理完成后发射信号，通知主窗口刷新所有页面
+
     def __init__(self, current_user=None, parent=None):
         super().__init__(parent)
         self.current_user = current_user
@@ -3750,7 +3843,9 @@ class SettingsWidget(QWidget):
                     if clear_type == "stock_records":
                         cursor.execute("DELETE FROM stock_in")
                         cursor.execute("DELETE FROM stock_out")
+                        cursor.execute("DELETE FROM inspection_records")
                         cursor.execute("UPDATE ingredients SET current_stock = 0")
+                        cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('stock_in','stock_out','inspection_records')")
                         conn.commit()
                         result_msg = "入库出库记录已清理，库存已归零"
                         
@@ -3776,6 +3871,7 @@ class SettingsWidget(QWidget):
                         cursor.execute("DELETE FROM inventory_check")
                         cursor.execute("DELETE FROM operation_logs")
                         cursor.execute("UPDATE ingredients SET current_stock = 0")
+                        cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('stock_in','stock_out','inspection_records','inventory_check','operation_logs')")
                         conn.commit()
                         result_msg = "所有业务数据已清理，库存已归零"
                         
@@ -3795,7 +3891,12 @@ class SettingsWidget(QWidget):
                             cursor.execute("DELETE FROM users WHERE id != ?", (self.current_user.id,))
                         else:
                             cursor.execute("DELETE FROM users WHERE id > 1")  # 保留admin
+                        # 重置自增ID序列
+                        cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('stock_in','stock_out','inspection_records','inventory_check','operation_logs','ingredients','suppliers','categories','category_mappings','inspectors')")
                         conn.commit()
+                        # 恢复默认分类、查验人员和类别映射
+                        cursor.execute("PRAGMA foreign_keys = ON")
+                        init_database()
                         result_msg = "系统已重置为初始状态"
                     
                     cursor.execute("PRAGMA foreign_keys = ON")
@@ -3806,6 +3907,8 @@ class SettingsWidget(QWidget):
                     
                     QMessageBox.information(self, "清理完成", result_msg)
                     confirm_dialog.accept()
+                    # 通知主窗口刷新所有页面数据
+                    self.data_cleared.emit()
                     
             except Exception as e:
                 QMessageBox.critical(self, "清理失败", f"操作失败: {str(e)}")
@@ -4223,6 +4326,7 @@ class MainWindow(QMainWindow):
         self.category_dialog = CategoryDialog()
         self.category_mapping_dialog = CategoryMappingDialog()
         self.settings_page = SettingsWidget(current_user=self.current_user)
+        self.settings_page.data_cleared.connect(self.refresh_all_pages)
         
         self.stack.addWidget(self.overview_page)
         self.stack.addWidget(self.alert_page)
@@ -4313,6 +4417,26 @@ class MainWindow(QMainWindow):
     def update_nav(self, index):
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
+
+    def refresh_all_pages(self):
+        """数据清理后刷新所有页面"""
+        try:
+            self.overview_page.load_data()
+            self.alert_page.load_data()
+            self.finance_page.load_data()
+            self.ingredient_dialog.load_data()
+            self.stock_in_dialog.load_data()
+            self.stock_in_dialog.load_ingredients()
+            self.stock_out_dialog.load_data()
+            self.stock_out_dialog.load_ingredients()
+            self.inventory_dialog.load_data()
+            self.inventory_dialog.load_ingredients()
+            self.inspection_dialog.load_data()
+            self.supplier_dialog.load_data()
+            self.category_dialog.load_data()
+            self.category_mapping_dialog.load_data()
+        except Exception as e:
+            logger.warning(f"刷新页面时出错: {e}")
 
 
 def main():

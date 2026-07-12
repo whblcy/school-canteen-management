@@ -865,6 +865,20 @@ class StockOutDAO:
             return [StockOut(**dict(row)) for row in rows]
     
     @staticmethod
+    def get_weighted_price(ingredient_id: int) -> float:
+        """获取食材的加权平均单价 = SUM(total_price)/SUM(quantity)"""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT CASE WHEN SUM(quantity) > 0
+                            THEN SUM(total_price) / SUM(quantity)
+                            ELSE 0 END as weighted_price
+                FROM stock_in WHERE ingredient_id = ?
+            ''', (ingredient_id,))
+            row = cursor.fetchone()
+            return row['weighted_price'] if row else 0
+    
+    @staticmethod
     def add(ingredient_id: int, quantity: float, unit_price: float = 0,
             purpose: str = "", department: str = "", operator: str = "",
             remark: str = "") -> Tuple[bool, str]:
@@ -888,7 +902,23 @@ class StockOutDAO:
                 if current_stock < quantity:
                     conn.rollback()
                     return False, f"库存不足，当前库存: {current_stock}"
-                
+
+                # 食品安全检查：拦截全部批次已过期的食材出库
+                cursor.execute('''
+                    SELECT
+                        COUNT(*) as total_batches,
+                        SUM(CASE WHEN expiry_date IS NULL OR expiry_date = ''
+                                  OR expiry_date >= date('now')
+                                 THEN 1 ELSE 0 END) as unexpired_batches
+                    FROM stock_in
+                    WHERE ingredient_id = ?
+                ''', (ingredient_id,))
+                batch_info = cursor.fetchone()
+                if (batch_info and batch_info['total_batches'] > 0
+                        and batch_info['unexpired_batches'] == 0):
+                    conn.rollback()
+                    return False, "该食材所有入库批次已过期，禁止出库（食品安全管控）"
+
                 total_price = quantity * unit_price
                 
                 cursor.execute('''
@@ -1011,18 +1041,24 @@ class ReportDAO:
     
     @staticmethod
     def get_inventory_value() -> float:
+        """库存总值：使用加权平均单价 = SUM(total_price)/SUM(quantity)"""
         with get_connection() as conn:
             cursor = conn.cursor()
+            # 计算每种食材的加权平均单价，再乘以当前库存
             cursor.execute('''
-                SELECT SUM(i.current_stock * COALESCE(
-                    (SELECT unit_price FROM stock_in WHERE ingredient_id = i.id ORDER BY created_at DESC LIMIT 1),
-                    0
-                )) as total_value
+                SELECT i.id, i.current_stock,
+                       COALESCE(
+                           (SELECT CASE WHEN SUM(quantity) > 0
+                                        THEN SUM(total_price) / SUM(quantity)
+                                        ELSE 0 END
+                            FROM stock_in WHERE ingredient_id = i.id),
+                           0) as weighted_price
                 FROM ingredients i
-                WHERE i.status = 1
+                WHERE i.status = 1 AND i.current_stock > 0
             ''')
-            row = cursor.fetchone()
-            return row['total_value'] or 0
+            rows = cursor.fetchall()
+            total_value = sum(row['current_stock'] * row['weighted_price'] for row in rows)
+            return total_value
 
     @staticmethod
     def get_monthly_finance(year: int, month: int) -> dict:
