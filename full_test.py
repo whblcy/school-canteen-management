@@ -3,8 +3,8 @@ import sys
 import os
 import traceback
 
-os.chdir(r'c:\Users\lcy\.trae-cn\work\6a34a75646f095538b4661f9')
-sys.path.insert(0, r'c:\Users\lcy\.trae-cn\work\6a34a75646f095538b4661f9')
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # 删除旧数据库，从头测试
 if os.path.exists('canteen.db'):
@@ -24,6 +24,10 @@ def test(name, func):
 print("=" * 60)
 print("学校食堂食材管理系统 - 全面测试")
 print("=" * 60)
+
+def assert_true(cond, msg=""):
+    if not cond:
+        raise AssertionError(msg)
 
 # ========== 1. 数据库初始化 ==========
 print("\n[1] 数据库初始化")

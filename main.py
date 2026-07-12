@@ -38,7 +38,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHeaderView, QTabWidget, QFormLayout, QDateEdit,
                              QGroupBox, QFrame, QStackedWidget,
                              QFileDialog, QInputDialog, QGridLayout,
-                             QScrollArea, QSizePolicy, QCheckBox)
+                             QScrollArea, QSizePolicy, QCheckBox, QToolButton, QMenu)
 from PyQt6.QtCore import Qt, QDate, QSize
 from PyQt6.QtGui import QAction, QIcon, QFont, QPalette, QColor
 
@@ -1597,7 +1597,7 @@ class InspectionRecordDialog(BaseDialog):
         self.batch_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.batch_table.horizontalHeader().setSectionsMovable(True)
         self.batch_table.horizontalHeader().setHighlightSections(False)
-        self.batch_table.verticalHeader().setDefaultSectionSize(28)
+        self.batch_table.verticalHeader().setDefaultSectionSize(30)
         # 设置默认列宽
         self.batch_table.setColumnWidth(0, 40)   # ✅
         self.batch_table.setColumnWidth(1, 120)  # 食材
@@ -1613,6 +1613,8 @@ class InspectionRecordDialog(BaseDialog):
         self.batch_table.horizontalHeader().setMinimumSectionSize(50)
         self.batch_table.setAlternatingRowColors(True)
         self.batch_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.batch_table.cellClicked.connect(self._on_batch_cell_clicked)
+        self.batch_table.itemEntered.connect(self._on_batch_item_entered)
         
         batch_layout.addWidget(self.batch_table)
         layout.addWidget(batch_group)
@@ -1787,87 +1789,17 @@ class InspectionRecordDialog(BaseDialog):
             self.batch_table.setItem(row_idx, 6, QTableWidgetItem(row['supplier_name'] or ""))
             self.batch_table.setItem(row_idx, 7, QTableWidgetItem(row['batch_number'] or ""))
             
-            # 查验结果下拉框
-            result_combo = QComboBox()
-            result_combo.addItems(["合格", "不合格"])
-            result_combo.setCurrentText(row['existing_result'] or "合格")
-            result_combo.setStyleSheet("""
-                QComboBox {
-                    border: 1px solid #d2d2d7;
-                    border-radius: 4px;
-                    padding: 2px 6px;
-                    background-color: white;
-                    min-height: 24px;
-                    max-height: 24px;
-                    font-size: 12px;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    border-left: 1px solid #d2d2d7;
-                    width: 20px;
-                    border-top-right-radius: 4px;
-                    border-bottom-right-radius: 4px;
-                    background-color: #f5f5f7;
-                }
-                QComboBox::down-arrow {
-                    width: 8px;
-                    height: 8px;
-                    border-width: 0 0 2px 2px;
-                    border-style: solid;
-                    border-color: #86868b;
-                    transform: rotate(-45deg);
-                }
-                QComboBox QAbstractItemView {
-                    border: 1px solid #d2d2d7;
-                    border-radius: 6px;
-                    background-color: white;
-                    selection-background-color: #0071e3;
-                }
-            """)
-            self.batch_table.setCellWidget(row_idx, 8, result_combo)
+            result_text = str(row['existing_result'] or '合格').strip().rstrip('v').strip()
+            result_item = QTableWidgetItem(f"{result_text} ▼")
+            result_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            result_item.setForeground(QColor("#0071e3"))
+            self.batch_table.setItem(row_idx, 8, result_item)
             
-            # 查验人下拉框
-            inspector_combo = QComboBox()
-            inspector_combo.setEditable(True)
-            inspectors = InspectorDAO.get_active()
-            if inspectors:
-                inspector_combo.addItems([i.name for i in inspectors])
-            if row['existing_inspector']:
-                inspector_combo.setCurrentText(row['existing_inspector'])
-            inspector_combo.setStyleSheet("""
-                QComboBox {
-                    border: 1px solid #d2d2d7;
-                    border-radius: 4px;
-                    padding: 2px 6px;
-                    background-color: white;
-                    min-height: 24px;
-                    max-height: 24px;
-                    font-size: 12px;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    border-left: 1px solid #d2d2d7;
-                    width: 20px;
-                    border-top-right-radius: 4px;
-                    border-bottom-right-radius: 4px;
-                    background-color: #f5f5f7;
-                }
-                QComboBox::down-arrow {
-                    width: 8px;
-                    height: 8px;
-                    border-width: 0 0 2px 2px;
-                    border-style: solid;
-                    border-color: #86868b;
-                    transform: rotate(-45deg);
-                }
-                QComboBox QAbstractItemView {
-                    border: 1px solid #d2d2d7;
-                    border-radius: 6px;
-                    background-color: white;
-                    selection-background-color: #0071e3;
-                }
-            """)
-            self.batch_table.setCellWidget(row_idx, 9, inspector_combo)
+            inspector_text = str(row['existing_inspector'] or '--').strip().rstrip('v').strip()
+            inspector_item = QTableWidgetItem(f"{inspector_text} ▼")
+            inspector_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            inspector_item.setForeground(QColor("#0071e3"))
+            self.batch_table.setItem(row_idx, 9, inspector_item)
             
             self.batch_table.setItem(row_idx, 10, QTableWidgetItem(""))
             
@@ -1902,15 +1834,15 @@ class InspectionRecordDialog(BaseDialog):
         for i in range(self.batch_table.rowCount()):
             check_item = self.batch_table.item(i, 0)
             if check_item and check_item.checkState() == Qt.CheckState.Checked:
-                # 设置查验结果下拉框
-                result_combo = self.batch_table.cellWidget(i, 8)
-                if result_combo:
-                    result_combo.setCurrentText(result)
+                result_item = self.batch_table.item(i, 8)
+                if result_item:
+                    result_item.setText(f"{result} ▼")
+                    result_item.setForeground(QColor("#0071e3"))
                 
-                # 设置查验人下拉框
-                inspector_combo = self.batch_table.cellWidget(i, 9)
-                if inspector_combo:
-                    inspector_combo.setCurrentText(inspector)
+                inspector_item = self.batch_table.item(i, 9)
+                if inspector_item:
+                    inspector_item.setText(f"{inspector} ▼")
+                    inspector_item.setForeground(QColor("#0071e3"))
                 
                 count += 1
         
@@ -1989,12 +1921,12 @@ class InspectionRecordDialog(BaseDialog):
             except ValueError:
                 continue
             
-            # 从下拉框获取查验结果和查验人
-            result_combo = self.batch_table.cellWidget(i, 8)
-            inspection_result = result_combo.currentText() if result_combo else ""
+            # 从单元格获取查验结果和查验人
+            result_item = self.batch_table.item(i, 8)
+            inspection_result = result_item.text().strip() if result_item else ""
             
-            inspector_combo = self.batch_table.cellWidget(i, 9)
-            inspector = inspector_combo.currentText().strip() if inspector_combo else ""
+            inspector_item = self.batch_table.item(i, 9)
+            inspector = inspector_item.text().strip() if inspector_item else ""
             
             if not inspector:
                 self.show_warning(f"第 {i+1} 行查验人为空，请填写后再保存")
@@ -2024,6 +1956,44 @@ class InspectionRecordDialog(BaseDialog):
             self.batch_table.setRowCount(0)
         else:
             self.show_error("没有选中的可保存数据")
+    
+    def _on_batch_cell_clicked(self, row, col):
+        if col == 8:
+            menu = QMenu()
+            for item in ["合格", "不合格"]:
+                action = menu.addAction(item)
+                action.triggered.connect(lambda checked, r=row, c=col, text=item: self._set_cell_value(r, c, text))
+            cell_rect = self.batch_table.visualItemRect(self.batch_table.item(row, col))
+            menu.exec(self.batch_table.mapToGlobal(cell_rect.bottomLeft()))
+        elif col == 9:
+            menu = QMenu()
+            inspectors = InspectorDAO.get_active()
+            for item in [i.name for i in inspectors]:
+                action = menu.addAction(item)
+                action.triggered.connect(lambda checked, r=row, c=col, text=item: self._set_cell_value(r, c, text))
+            custom_action = menu.addAction("自定义...")
+            custom_action.triggered.connect(lambda checked, r=row, c=col: self._set_custom_cell_value(r, c))
+            cell_rect = self.batch_table.visualItemRect(self.batch_table.item(row, col))
+            menu.exec(self.batch_table.mapToGlobal(cell_rect.bottomLeft()))
+    
+    def _on_batch_item_entered(self, item):
+        row = self.batch_table.row(item)
+        col = self.batch_table.column(item)
+        if col == 8 or col == 9:
+            self.batch_table.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.batch_table.setCursor(Qt.CursorShape.ArrowCursor)
+    
+    def _set_cell_value(self, row, col, text):
+        item = self.batch_table.item(row, col)
+        if item:
+            item.setText(f"{text} ▼")
+            item.setForeground(QColor("#0071e3"))
+    
+    def _set_custom_cell_value(self, row, col):
+        text, ok = QInputDialog.getText(self, "自定义输入", "请输入内容：")
+        if ok and text.strip():
+            self._set_cell_value(row, col, text.strip())
     
     def add_record(self):
         dialog = InspectionRecordEditDialog(self)
