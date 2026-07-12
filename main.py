@@ -3835,6 +3835,7 @@ class SettingsWidget(QWidget):
         
         def do_clear():
             try:
+                logger.info(f"开始清理数据，类型: {clear_type}")
                 with get_connection() as conn:
                     cursor = conn.cursor()
                     
@@ -3842,9 +3843,13 @@ class SettingsWidget(QWidget):
                     
                     if clear_type == "stock_records":
                         cursor.execute("DELETE FROM stock_in")
+                        logger.info(f"stock_in 删除行数: {cursor.rowcount}")
                         cursor.execute("DELETE FROM stock_out")
+                        logger.info(f"stock_out 删除行数: {cursor.rowcount}")
                         cursor.execute("DELETE FROM inspection_records")
+                        logger.info(f"inspection_records 删除行数: {cursor.rowcount}")
                         cursor.execute("UPDATE ingredients SET current_stock = 0")
+                        logger.info(f"ingredients 库存归零行数: {cursor.rowcount}")
                         cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('stock_in','stock_out','inspection_records')")
                         conn.commit()
                         result_msg = "入库出库记录已清理，库存已归零"
@@ -4420,23 +4425,36 @@ class MainWindow(QMainWindow):
 
     def refresh_all_pages(self):
         """数据清理后刷新所有页面"""
+        logger.info("开始刷新所有页面")
         try:
             self.overview_page.load_data()
+            logger.info("overview_page 刷新完成")
             self.alert_page.load_data()
+            logger.info("alert_page 刷新完成")
             self.finance_page.load_data()
+            logger.info("finance_page 刷新完成")
             self.ingredient_dialog.load_data()
+            logger.info("ingredient_dialog 刷新完成")
             self.stock_in_dialog.load_data()
             self.stock_in_dialog.load_ingredients()
+            logger.info("stock_in_dialog 刷新完成")
             self.stock_out_dialog.load_data()
             self.stock_out_dialog.load_ingredients()
+            logger.info("stock_out_dialog 刷新完成")
             self.inventory_dialog.load_data()
             self.inventory_dialog.load_ingredients()
+            logger.info("inventory_dialog 刷新完成")
             self.inspection_dialog.load_data()
+            logger.info("inspection_dialog 刷新完成")
             self.supplier_dialog.load_data()
+            logger.info("supplier_dialog 刷新完成")
             self.category_dialog.load_data()
+            logger.info("category_dialog 刷新完成")
             self.category_mapping_dialog.load_data()
+            logger.info("category_mapping_dialog 刷新完成")
+            logger.info("所有页面刷新完成")
         except Exception as e:
-            logger.warning(f"刷新页面时出错: {e}")
+            logger.error(f"刷新页面时出错: {e}")
 
 
 def main():
