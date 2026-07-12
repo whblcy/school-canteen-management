@@ -1597,7 +1597,7 @@ class InspectionRecordDialog(BaseDialog):
         self.batch_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.batch_table.horizontalHeader().setSectionsMovable(True)
         self.batch_table.horizontalHeader().setHighlightSections(False)
-        self.batch_table.verticalHeader().setDefaultSectionSize(32)
+        self.batch_table.verticalHeader().setDefaultSectionSize(28)
         # 设置默认列宽
         self.batch_table.setColumnWidth(0, 40)   # ✅
         self.batch_table.setColumnWidth(1, 120)  # 食材
@@ -1795,23 +1795,23 @@ class InspectionRecordDialog(BaseDialog):
                 QComboBox {
                     border: 1px solid #d2d2d7;
                     border-radius: 4px;
-                    padding: 1px 4px;
+                    padding: 2px 6px;
                     background-color: white;
-                    min-height: 26px;
-                    max-height: 26px;
+                    min-height: 24px;
+                    max-height: 24px;
                     font-size: 12px;
                 }
                 QComboBox::drop-down {
                     border: none;
                     border-left: 1px solid #d2d2d7;
-                    width: 18px;
+                    width: 20px;
                     border-top-right-radius: 4px;
                     border-bottom-right-radius: 4px;
                     background-color: #f5f5f7;
                 }
                 QComboBox::down-arrow {
-                    width: 5px;
-                    height: 5px;
+                    width: 8px;
+                    height: 8px;
                     border-width: 0 0 2px 2px;
                     border-style: solid;
                     border-color: #86868b;
@@ -1838,23 +1838,23 @@ class InspectionRecordDialog(BaseDialog):
                 QComboBox {
                     border: 1px solid #d2d2d7;
                     border-radius: 4px;
-                    padding: 1px 4px;
+                    padding: 2px 6px;
                     background-color: white;
-                    min-height: 26px;
-                    max-height: 26px;
+                    min-height: 24px;
+                    max-height: 24px;
                     font-size: 12px;
                 }
                 QComboBox::drop-down {
                     border: none;
                     border-left: 1px solid #d2d2d7;
-                    width: 18px;
+                    width: 20px;
                     border-top-right-radius: 4px;
                     border-bottom-right-radius: 4px;
                     background-color: #f5f5f7;
                 }
                 QComboBox::down-arrow {
-                    width: 5px;
-                    height: 5px;
+                    width: 8px;
+                    height: 8px;
                     border-width: 0 0 2px 2px;
                     border-style: solid;
                     border-color: #86868b;
