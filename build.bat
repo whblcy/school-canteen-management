@@ -1,8 +1,27 @@
 @echo off
-echo æ­£åœ¨æ‰“åŒ…å­¦æ ¡é£Ÿå ‚é£Ÿæç®¡ç†ç³»ç»Ÿ...
-"C:\Users\lcy\AppData\Local\Python\pythoncore-3.14-64\python.exe" -m PyInstaller --windowed --icon=app_icon.ico --name="å­¦æ ¡é£Ÿå ‚é£Ÿæç®¡ç†ç³»ç»Ÿ" --noconfirm main.py
-echo æ‰“åŒ…å®Œæˆï¼
-echo æ­£åœ¨åˆ›å»ºå‹ç¼©åŒ…...
-powershell -Command "Compress-Archive -Path 'dist\å­¦æ ¡é£Ÿå ‚é£Ÿæç®¡ç†ç³»ç»Ÿ' -DestinationPath 'release\å­¦æ ¡é£Ÿå ‚é£Ÿæç®¡ç†ç³»ç»Ÿ.zip' -Force"
-echo å‹ç¼©åŒ…å·²åˆ›å»º: release\å­¦æ ¡é£Ÿå ‚é£Ÿæç®¡ç†ç³»ç»Ÿ.zip
+setlocal
+
+set PYTHON=C:\Users\lcy\AppData\Local\Python\pythoncore-3.14-64\python.exe
+set SPEC=Ñ§Ğ£Ê³ÌÃÊ³²Ä¹ÜÀíÏµÍ³.spec
+set DIST=dist\Ñ§Ğ£Ê³ÌÃÊ³²Ä¹ÜÀíÏµÍ³
+set ZIP=release\Ñ§Ğ£Ê³ÌÃÊ³²Ä¹ÜÀíÏµÍ³.zip
+
+echo ÕıÔÚÇåÀí¾É¹¹½¨...
+rmdir /s /q build dist __pycache__ 2>nul
+
+echo ÕıÔÚÊ¹ÓÃ SPEC ÎÄ¼ş´ò°ü...
+"%PYTHON%" -m PyInstaller --clean "%SPEC%"
+
+if not exist "%DIST%" (
+    echo ? ´ò°üÊ§°Ü£¬Î´Éú³ÉÊä³öÄ¿Â¼
+    pause
+    exit /b 1
+)
+
+echo ´ò°üÍê³É£¡
+
+echo ÕıÔÚ´´½¨Ñ¹Ëõ°ü...
+powershell -Command "Compress-Archive -Path '%DIST%' -DestinationPath '%ZIP%' -Force"
+
+echo ? Ñ¹Ëõ°üÒÑ´´½¨: %ZIP%
 pause

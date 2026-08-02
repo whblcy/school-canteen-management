@@ -7,6 +7,9 @@ __pycache__/
 dist/
 build/
 *.spec
+!school-canteen-v2.spec
+!学校食堂食材管理系统.spec
+.libs/
 
 # IDE
 .vscode/
@@ -42,3 +45,10 @@ release/
 表格/
 每日出入库表_*.xlsx
 食材导入模板_*.xlsx
+
+# WorkBuddy tool data (project memory, not source code)
+.workbuddy/
+
+# Verification artifacts (screenshots / exported reports)
+verify_reports/
+verify_screenshots/
